@@ -6,14 +6,14 @@ struct User {
     var height: Double
 }
 
-protocol Foo {}
+protocol Foo: class {}
 protocol Bar {}
 
 class ReflectTests: XCTestCase {
 
     func testStructs() {
 
-        let ty = StructType(type: User.self)
+        let ty = reflect(type: User.self) as! StructType
 
         XCTAssertEqual(ty.numberOfFields, 2)
         XCTAssertEqual(ty.fieldNames, ["name", "height"])
@@ -22,11 +22,35 @@ class ReflectTests: XCTestCase {
 
     func testExistentials() {
 
-        let ty = ExistentialType(type: (Foo & Bar).self)
+        var ty: ExistentialType
+
+        ty = reflect(type: Any.self) as! ExistentialType
+        XCTAssert(!ty.hasClassConstraint)
+        XCTAssert(ty.isAnyType)
+        XCTAssert(!ty.isAnyClassType)
+        XCTAssertEqual(ty.numberOfProtocolsMakingComposition, 0)
+
+        ty = reflect(type: Foo.self) as! ExistentialType
+        XCTAssert(ty.hasClassConstraint)
+        XCTAssert(!ty.isAnyType)
+        XCTAssert(!ty.isAnyClassType)
+        XCTAssertEqual(ty.numberOfProtocolsMakingComposition, 1)
+
+        ty = reflect(type: Bar.self) as! ExistentialType
+        XCTAssert(!ty.hasClassConstraint)
+        XCTAssert(!ty.isAnyType)
+        XCTAssert(!ty.isAnyClassType)
+        XCTAssertEqual(ty.numberOfProtocolsMakingComposition, 1)
+
+        ty = reflect(type: (Foo & Bar).self) as! ExistentialType
+        XCTAssert(ty.hasClassConstraint)
+        XCTAssert(!ty.isAnyType)
+        XCTAssert(!ty.isAnyClassType)
+        XCTAssertEqual(ty.numberOfProtocolsMakingComposition, 2)
 
         print(ty.numberOfWitnessTables)
-        print(ty.mangledNames)
-        print(ty.sizes)
+        print(ty.mangledName)
+        print(ty.hasClassConstraint)
     }
 
     static var allTests: [(String, (ReflectTests) -> () -> Void)] = [

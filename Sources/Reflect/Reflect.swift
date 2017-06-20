@@ -4,6 +4,28 @@
 //     https://github.com/apple/swift/blob/master/docs/ABI.rst
 //
 
+func reflect(type: Any.Type) -> Type {
+
+    let flag = unsafeBitCast(type, to: UnsafePointer<Int>.self).pointee
+    let kind = Type.Kind(flag: flag)
+    switch kind {
+    case .struct:
+        return StructType(type: type)
+
+    case .tuple:
+        return TupleType(type: type)
+
+    case .enum, .optional:
+        return EnumType(type: type)
+
+    case .existential:
+        return ExistentialType(type: type)
+
+    default:
+        return Type(type: type)
+    }
+}
+
 class Type: Equatable {
     var pointer: UnsafeRawPointer
 
@@ -107,13 +129,6 @@ final class StructType: Type {
         }
 
         return types
-    }
-}
-
-final class ClassType: Type {
-
-    override init(type: Any.Type) {
-        fatalError("ClassTypes are currently unsupported")
     }
 }
 
@@ -248,6 +263,13 @@ class ExistentialType: Type {
         assert(kind == .existential)
     }
 
+    var mangledName: String { // offset 0
+
+        let offset = pointer.assumingMemoryBound(to: Int32.self).pointee
+        let p = pointer.advanced(by: numericCast(offset)).assumingMemoryBound(to: CChar.self)
+        return String(cString: p)
+    }
+
     // The number of witness tables is stored in the least significant 31 bits. Values of the protocol type contain this number of witness table pointers in
     //   their layout.
     var numberOfWitnessTables: Int {
@@ -272,27 +294,24 @@ class ExistentialType: Type {
         return pointer.pointee
     }
 
-    var protocolDescriptorVectorPointer: UnsafeBufferPointer<UnsafeRawPointer> {
+    var isAnyType: Bool {
+        return (numberOfProtocolsMakingComposition == 0) && !hasClassConstraint
+    }
+
+    var isAnyClassType: Bool {
+        return (numberOfProtocolsMakingComposition == 0) && hasClassConstraint
+    }
+
+    var protocolDescriptorVectorPointer: UnsafeBufferPointer<UnsafePointer<ProtocolDescriptor>> {
         let offset = 3
-        let pointer = self.pointer.assumingMemoryBound(to: UnsafeRawPointer.self).advanced(by: offset)
+        let pointer = self.pointer.assumingMemoryBound(to: UnsafePointer<ProtocolDescriptor>.self).advanced(by: offset)
         let buffer = UnsafeBufferPointer(start: pointer, count: numberOfProtocolsMakingComposition)
         return buffer
     }
 
-    var mangledNames: [String] {
-        let offset = 1
-        return protocolDescriptorVectorPointer.map { pointer in
-            let reloffset = pointer.assumingMemoryBound(to: Int32.self).advanced(by: offset).pointee
-            let p = pointer.advanced(by: numericCast(reloffset)).assumingMemoryBound(to: CChar.self)
-            return String(cString: p)
-        }
-    }
+    var protocolDescriptors: [ProtocolDescriptor] {
 
-    var sizes: [Int] {
-        let offset = 8
-        return protocolDescriptorVectorPointer.map { pointer in
-            return numericCast(pointer.assumingMemoryBound(to: Int32.self).advanced(by: offset).pointee)
-        }
+        return protocolDescriptorVectorPointer.map({ $0.pointee })
     }
 
 //    typealias FieldsTypeAccessor = @convention(c) (UnsafeRawPointer) -> UnsafePointer<UnsafeRawPointer>
@@ -322,8 +341,17 @@ class ExistentialType: Type {
 //    }
 }
 
-final class ProtocolType: Type {
-
+struct ProtocolDescriptor {
+    var isa: Int
+    var mangledName: UnsafePointer<CChar>
+    var inheritedProtocolList: Int
+    var objcA: Int
+    var objcB: Int
+    var objcC: Int
+    var objcD: Int
+    var objcE: Int
+    var size: Int32
+    var flags: Int32
 }
 
 extension Type {
