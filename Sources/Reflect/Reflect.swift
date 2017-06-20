@@ -47,22 +47,42 @@ class Type: Equatable {
 }
 
 final class StructType: Type {
+
     var nominalTypeDescriptorOffset: Int {
         return 1
     }
 
     var nominalTypeDescriptorPointer: UnsafeRawPointer {
-        let pointer = self.pointer.assumingMemoryBound(to: Int.self)
-        let base = pointer.advanced(by: nominalTypeDescriptorOffset)
-        return UnsafeRawPointer(base).advanced(by: base.pointee)
+        let relpointer = self.pointer.advanced(by: nominalTypeDescriptorOffset * word)
+        return relpointer.advanced(by: relpointer.load(as: Int.self))
+    }
+
+    // MARK: Nominal Type Descriptor
+
+    // NOTE(vdka): Not sure why but all the offset's mentioned in the ABI for Nominal Type Descriptors are off by 1. The pointer we have points to the mangled name offset.
+
+    var mangledName: String {
+        let offset = 0
+
+        let relpointer = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
+        let pointer = relpointer.advanced(by: Int(relpointer.load(as: Int32.self)))
+            .assumingMemoryBound(to: CChar.self)
+
+        return String(cString: pointer)
+    }
+
+    var numberOfFields: Int {
+        let offset = 1
+        let pointer = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
+        return numericCast(pointer.load(as: Int32.self))
     }
 
     var fieldOffsets: [Int] {
-        let offset = 3
-        let base = UnsafeRawPointer(self.pointer.assumingMemoryBound(to: Int.self).advanced(by: offset)).assumingMemoryBound(to: Int.self)
+        let offset = 2
+
+        let base = self.pointer.assumingMemoryBound(to: Int.self).advanced(by: offset + nominalTypeDescriptorOffset)
 
         var offsets: [Int] = []
-
         for index in 0..<numberOfFields {
             offsets.append(base.advanced(by: index).pointee)
         }
@@ -70,32 +90,14 @@ final class StructType: Type {
         return offsets
     }
 
-    // NOTE: The rest of the struct Metadata is stored on the NominalTypeDescriptor
-
-    // NOTE(vdka): Not sure why but all the offset's mentioned in the ABI for Nominal Type Descriptors are off by 1. The pointer we have points to the mangled name offset.
-
-    var mangledName: String { // offset 0
-
-        let offset = nominalTypeDescriptorPointer.assumingMemoryBound(to: Int32.self).pointee
-        let p = nominalTypeDescriptorPointer.advanced(by: numericCast(offset)).assumingMemoryBound(to: CChar.self)
-        return String(cString: p)
-    }
-
-    var numberOfFields: Int { // offset 1
-
-        let offset = 1
-        return numericCast(nominalTypeDescriptorPointer.load(fromByteOffset: offset * halfword, as: Int32.self))
-    }
-
-    var fieldNames: [String] { // offset 3
-
+    var fieldNames: [String] {
         let offset = 3
-        let base = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
 
-        let dataOffset = base.load(as: Int32.self)
-        let fieldNamesPointer = base.advanced(by: numericCast(dataOffset))
+        let relpointer = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
 
-        return Array(utf8Strings: fieldNamesPointer.assumingMemoryBound(to: CChar.self))
+        let pointer = relpointer.advanced(by: relpointer.load(as: Int32.self))
+
+        return Array(utf8Strings: pointer.assumingMemoryBound(to: CChar.self))
     }
 
     //
@@ -106,16 +108,15 @@ final class StructType: Type {
     //   references for the types of the fields of that instance. The order matches that of the field offset vector
     //   and field name list.
     typealias FieldsTypeAccessor = @convention(c) (UnsafeRawPointer) -> UnsafePointer<UnsafeRawPointer>
-    var fieldTypesAccessor: FieldsTypeAccessor? { // offset 4
-
+    var fieldTypesAccessor: FieldsTypeAccessor? {
         let offset = 4
-        let base = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
 
-        let dataOffset = base.load(as: Int32.self)
-        guard dataOffset != 0 else { return nil }
+        let relpointer = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
 
-        let dataPointer = base.advanced(by: numericCast(dataOffset))
-        return unsafeBitCast(dataPointer, to: FieldsTypeAccessor.self)
+        let pointer = relpointer.advanced(by: relpointer.load(as: Int32.self))
+        guard relpointer != pointer else { return nil }
+
+        return unsafeBitCast(pointer, to: FieldsTypeAccessor.self)
     }
 
     var fieldTypes: [Type]? {
@@ -130,9 +131,20 @@ final class StructType: Type {
 
         return types
     }
+
+    var isGeneric: Bool {
+        let offset = 6
+        let pointer = self.nominalTypeDescriptorPointer.advanced(by: offset * word)
+            .assumingMemoryBound(to: Int.self)
+        return pointer.pointee != 0
+    }
 }
 
 final class EnumType: Type {
+
+    var isOptionalType: Bool {
+        return kind == .optional
+    }
 
     var nominalTypeDescriptorOffset: Int {
         return 1
@@ -144,29 +156,31 @@ final class EnumType: Type {
         return UnsafeRawPointer(base).advanced(by: base.pointee)
     }
 
-    var mangledName: String { // offset 0
+    var mangledName: String {
+        let offset = 0
 
-        let offset = nominalTypeDescriptorPointer.assumingMemoryBound(to: Int32.self).pointee
-        let p = nominalTypeDescriptorPointer.advanced(by: numericCast(offset)).assumingMemoryBound(to: CChar.self)
-        return String(cString: p)
+        let relpointer = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
+        let pointer = relpointer.advanced(by: Int(relpointer.load(as: Int32.self)))
+            .assumingMemoryBound(to: CChar.self)
+
+        return String(cString: pointer)
     }
 
-    var numberOfPayloadCases: Int { // offset 1
-
+    var numberOfPayloadCases: Int {
         let offset = 1
-        let val = nominalTypeDescriptorPointer.load(fromByteOffset: offset * halfword, as: Int32.self)
+        let val = nominalTypeDescriptorPointer.advanced(by: offset * halfword).load(as: Int32.self)
         return numericCast(val & 0x0FFF)
     }
 
-    var payloadSizeOffset: Int { // offset 1
+    var payloadSizeOffset: Int {
         let offset = 1
-        let val = nominalTypeDescriptorPointer.load(fromByteOffset: offset * halfword, as: Int32.self)
+        let val = nominalTypeDescriptorPointer.advanced(by: offset * halfword).load(as: Int32.self)
         return numericCast(val & 0xF000)
     }
 
-    var numberOfNoPayloadCases: Int { // offset 2
+    var numberOfNoPayloadCases: Int {
         let offset = 2
-        let val = nominalTypeDescriptorPointer.load(fromByteOffset: offset * halfword, as: Int32.self)
+        let val = nominalTypeDescriptorPointer.advanced(by: offset * halfword).load(as: Int32.self)
         return numericCast(val)
     }
 
@@ -175,27 +189,26 @@ final class EnumType: Type {
     }
 
     // Order is payload cases first then non payload cases, in those segments the order is source order.
-    var caseNames: [String] { // offset 3
+    var caseNames: [String] {
         let offset = 3
-        let base = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
+        let relpointer = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
 
-        let dataOffset = base.load(as: Int32.self)
-        let fieldNamesPointer = base.advanced(by: numericCast(dataOffset))
+        let pointer = relpointer.advanced(by: relpointer.load(as: Int32.self))
+            .assumingMemoryBound(to: CChar.self)
 
-        return Array(utf8Strings: fieldNamesPointer.assumingMemoryBound(to: CChar.self))
+        return Array(utf8Strings: pointer)
     }
 
     typealias CaseTypeAccessor = @convention(c) (UnsafeRawPointer) -> UnsafePointer<UnsafeRawPointer>
     var caseTypesAccessor: CaseTypeAccessor? { // offset 4
-
         let offset = 4
-        let base = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
 
-        let dataOffset = base.load(as: Int32.self)
-        guard dataOffset != 0 else { return nil }
+        let relpointer = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
 
-        let dataPointer = base.advanced(by: numericCast(dataOffset))
-        return unsafeBitCast(dataPointer, to: CaseTypeAccessor.self)
+        let pointer = relpointer.advanced(by: relpointer.load(as: Int32.self))
+        guard relpointer != pointer else { return nil }
+
+        return unsafeBitCast(pointer, to: CaseTypeAccessor.self)
     }
 
     var caseTypes: [Any.Type]? {
@@ -215,19 +228,26 @@ final class EnumType: Type {
 
         return types
     }
+
+    var isGeneric: Bool {
+        let offset = 6
+        let pointer = self.nominalTypeDescriptorPointer.advanced(by: offset * word)
+            .assumingMemoryBound(to: Int.self)
+        return pointer.pointee != 0
+    }
 }
 
 final class TupleType: Type {
 
     var numberOfElements: Int {
         let offset = 1
-        let pointer = UnsafeRawPointer(self.pointer.assumingMemoryBound(to: Int.self).advanced(by: offset)).assumingMemoryBound(to: Int.self)
-        return pointer.pointee
+        return pointer.advanced(by: offset * word).load(as: Int.self)
     }
 
     var elementTypes: [Any.Type] {
         let offset = 3
-        let pointer = UnsafeRawPointer(self.pointer.assumingMemoryBound(to: Int.self).advanced(by: offset)).assumingMemoryBound(to: Int.self)
+
+        let pointer = self.pointer.advanced(by: offset * word).assumingMemoryBound(to: Int.self)
 
         var types: [Any.Type] = []
 
@@ -241,7 +261,8 @@ final class TupleType: Type {
 
     var elementOffsets: [Int] {
         let offset = 3
-        let pointer = UnsafeRawPointer(self.pointer.assumingMemoryBound(to: Int.self).advanced(by: offset)).assumingMemoryBound(to: Int.self)
+
+        let pointer = self.pointer.advanced(by: offset * word).assumingMemoryBound(to: Int.self)
 
         var offsets: [Int] = []
 
@@ -258,17 +279,6 @@ final class TupleType: Type {
  The protocol descriptor vector begins at offset 3. This is an inline array of pointers to the protocol descriptor for every protocol in the composition, or the single protocol descriptor for a protocol type. For an "any" type, there is no protocol descriptor vector.
 */
 class ExistentialType: Type {
-
-    func validate() {
-        assert(kind == .existential)
-    }
-
-    var mangledName: String { // offset 0
-
-        let offset = pointer.assumingMemoryBound(to: Int32.self).pointee
-        let p = pointer.advanced(by: numericCast(offset)).assumingMemoryBound(to: CChar.self)
-        return String(cString: p)
-    }
 
     // The number of witness tables is stored in the least significant 31 bits. Values of the protocol type contain this number of witness table pointers in
     //   their layout.
@@ -313,32 +323,6 @@ class ExistentialType: Type {
 
         return protocolDescriptorVectorPointer.map({ $0.pointee })
     }
-
-//    typealias FieldsTypeAccessor = @convention(c) (UnsafeRawPointer) -> UnsafePointer<UnsafeRawPointer>
-//    var fieldTypesAccessor: FieldsTypeAccessor? { // offset 4
-//
-//        let offset = 4
-//        let base = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
-//
-//        let dataOffset = base.load(as: Int32.self)
-//        guard dataOffset != 0 else { return nil }
-//
-//        let dataPointer = base.advanced(by: numericCast(dataOffset))
-//        return unsafeBitCast(dataPointer, to: FieldsTypeAccessor.self)
-//    }
-//
-//    var fieldTypes: [Any.Type]? {
-//        guard let accessorFunction = fieldTypesAccessor else { return nil }
-//
-//        var types: [Any.Type] = []
-//        for fieldIndex in 0..<numberOfFields {
-//            let pointer = accessorFunction(nominalTypeDescriptorPointer).advanced(by: fieldIndex).pointee
-//            let type = unsafeBitCast(pointer, to: Any.Type.self)
-//            types.append(type)
-//        }
-//
-//        return types
-//    }
 }
 
 struct ProtocolDescriptor {
@@ -393,16 +377,33 @@ extension Type {
     }
 }
 
+public protocol HasNominalTypeDescriptor {
+
+    var nominalTypeDescriptorPointer: UnsafeRawPointer { get }
+    var mangledName: String { get }
+    var isGeneric: Bool { get }
+}
+
+extension HasNominalTypeDescriptor {
+
+    var mangledName: String {
+        let offset = 1
+        let pointer = self.nominalTypeDescriptorPointer.advanced(by: offset * word)
+            .assumingMemoryBound(to: CChar.self)
+        return String(cString: pointer)
+    }
+
+
+}
 
 
 
+internal extension UnsafeRawPointer {
 
-
-
-
-
-
-
+    func advanced(by offset: Int32) -> UnsafeRawPointer {
+        return self.advanced(by: Int(offset))
+    }
+}
 
 
 
@@ -653,7 +654,7 @@ extension Metadata.Struct {
     var mangledName: String { // offset 0
 
         let offset = nominalTypeDescriptorPointer.assumingMemoryBound(to: Int32.self).pointee
-        let p = nominalTypeDescriptorPointer.advanced(by: numericCast(offset)).assumingMemoryBound(to: CChar.self)
+        let p = nominalTypeDescriptorPointer.advanced(by: offset).assumingMemoryBound(to: CChar.self)
         return String(cString: p)
     }
 
@@ -669,7 +670,7 @@ extension Metadata.Struct {
         let base = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
 
         let dataOffset = base.load(as: Int32.self)
-        let fieldNamesPointer = base.advanced(by: numericCast(dataOffset))
+        let fieldNamesPointer = base.advanced(by: dataOffset)
 
         return Array(utf8Strings: fieldNamesPointer.assumingMemoryBound(to: CChar.self))
     }
@@ -690,7 +691,7 @@ extension Metadata.Struct {
         let dataOffset = base.load(as: Int32.self)
         guard dataOffset != 0 else { return nil }
 
-        let dataPointer = base.advanced(by: numericCast(dataOffset))
+        let dataPointer = base.advanced(by: dataOffset)
         return unsafeBitCast(dataPointer, to: FieldsTypeAccessor.self)
     }
 
@@ -730,7 +731,7 @@ extension Metadata.Enum {
     var mangledName: String { // offset 0
 
         let offset = nominalTypeDescriptorPointer.assumingMemoryBound(to: Int32.self).pointee
-        let p = nominalTypeDescriptorPointer.advanced(by: numericCast(offset)).assumingMemoryBound(to: CChar.self)
+        let p = nominalTypeDescriptorPointer.advanced(by: offset).assumingMemoryBound(to: CChar.self)
         return String(cString: p)
     }
 
@@ -763,7 +764,7 @@ extension Metadata.Enum {
         let base = nominalTypeDescriptorPointer.advanced(by: offset * halfword)
 
         let dataOffset = base.load(as: Int32.self)
-        let fieldNamesPointer = base.advanced(by: numericCast(dataOffset))
+        let fieldNamesPointer = base.advanced(by: dataOffset)
 
         return Array(utf8Strings: fieldNamesPointer.assumingMemoryBound(to: CChar.self))
     }
@@ -777,7 +778,7 @@ extension Metadata.Enum {
         let dataOffset = base.load(as: Int32.self)
         guard dataOffset != 0 else { return nil }
 
-        let dataPointer = base.advanced(by: numericCast(dataOffset))
+        let dataPointer = base.advanced(by: dataOffset)
         return unsafeBitCast(dataPointer, to: CaseTypeAccessor.self)
     }
 

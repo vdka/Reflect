@@ -15,9 +15,32 @@ class ReflectTests: XCTestCase {
 
         let ty = reflect(type: User.self) as! StructType
 
+        print(ty.mangledName)
+        XCTAssertEqual(ty.mangledName, "12ReflectTests4UserV")
         XCTAssertEqual(ty.numberOfFields, 2)
         XCTAssertEqual(ty.fieldNames, ["name", "height"])
         XCTAssertEqual(ty.fieldOffsets, [0, 24])
+        XCTAssert(!ty.isGeneric)
+    }
+
+    func testTuples() {
+
+        let ty = reflect(type: (String, Double).self) as! TupleType
+        XCTAssertEqual(ty.numberOfElements, 2)
+        XCTAssertEqual(ty.elementOffsets, [0, 24])
+    }
+
+    func testEnums() {
+        var ty: EnumType
+
+        ty = reflect(type: Optional<String>.self) as! EnumType
+        XCTAssert(ty.isOptionalType)
+        XCTAssertEqual(ty.numberOfCases, 2)
+        XCTAssertEqual(ty.mangledName, "Sq")
+        XCTAssertEqual(ty.numberOfPayloadCases, 1)
+        XCTAssertEqual(ty.numberOfNoPayloadCases, 1)
+        XCTAssertEqual(ty.payloadSizeOffset, 0)
+        XCTAssertEqual(ty.caseNames, ["some", "none"])
     }
 
     func testExistentials() {
@@ -49,7 +72,6 @@ class ReflectTests: XCTestCase {
         XCTAssertEqual(ty.numberOfProtocolsMakingComposition, 2)
 
         print(ty.numberOfWitnessTables)
-        print(ty.mangledName)
         print(ty.hasClassConstraint)
     }
 
