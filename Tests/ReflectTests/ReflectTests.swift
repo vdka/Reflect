@@ -23,16 +23,9 @@ class ReflectTests: XCTestCase {
         XCTAssert(!ty.isGeneric)
     }
 
-    func testTuples() {
-
-        let ty = reflect(type: (String, Double).self) as! TupleType
-        XCTAssertEqual(ty.numberOfElements, 2)
-        XCTAssertEqual(ty.elementOffsets, [0, 24])
-    }
-
     func testEnums() {
         var ty: EnumType
-
+        
         ty = reflect(type: Optional<String>.self) as! EnumType
         XCTAssert(ty.isOptionalType)
         XCTAssertEqual(ty.numberOfCases, 2)
@@ -41,6 +34,38 @@ class ReflectTests: XCTestCase {
         XCTAssertEqual(ty.numberOfNoPayloadCases, 1)
         XCTAssertEqual(ty.payloadSizeOffset, 0)
         XCTAssertEqual(ty.caseNames, ["some", "none"])
+    }
+
+    func testTuples() {
+
+        let ty = reflect(type: (String, Double).self) as! TupleType
+        XCTAssertEqual(ty.numberOfElements, 2)
+        XCTAssertEqual(ty.elementOffsets, [0, 24])
+    }
+
+    func testFunctions() {
+        var ty: FunctionType
+
+        ty = reflect(type: ((Int) -> Int).self) as! FunctionType
+
+        XCTAssertEqual(ty.numberOfArguments, 1)
+        XCTAssertEqual(ty.resultType, reflect(type: Int.self))
+        XCTAssertEqual(ty.argumentType(at: 0), reflect(type: Int.self))
+        XCTAssertEqual(ty.argumentType(at: 0), reflect(type: Int.self))
+
+        XCTAssertFalse(ty.isParamInout(at: 0))
+        XCTAssertFalse(ty.hasInoutArguments)
+
+        ty = reflect(type: ((inout Int, inout Int, Float) -> (Float, Bool)).self) as! FunctionType
+        XCTAssertEqual(ty.numberOfArguments, 3)
+        XCTAssertEqual(ty.resultType, reflect(type: (Float, Bool).self))
+        XCTAssertEqual(ty.argumentType(at: 0), reflect(type: Int.self))
+        XCTAssertEqual(ty.argumentType(at: 1), reflect(type: Int.self))
+        XCTAssertEqual(ty.argumentType(at: 2), reflect(type: Float.self))
+        XCTAssertTrue(ty.isParamInout(at: 0))
+        XCTAssertTrue(ty.isParamInout(at: 1))
+        XCTAssertFalse(ty.isParamInout(at: 2))
+        XCTAssertTrue(ty.hasInoutArguments)
     }
 
     func testExistentials() {

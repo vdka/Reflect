@@ -18,6 +18,9 @@ func reflect(type: Any.Type) -> Type {
     case .enum, .optional:
         return EnumType(type: type)
 
+    case .function:
+        return FunctionType(type: type)
+
     case .existential:
         return ExistentialType(type: type)
 
@@ -287,21 +290,70 @@ class FunctionType: Type {
         return reflect(type: ty)
     }
 
-    var argumentType: [Type] {
-        guard numberOfArguments > 0 else {
-            return []
-        }
+    var argumentTypes: [Type] {
+        return (0..<numberOfArguments).map(argumentType(at:))
+    }
 
+    func argumentType(at index: Int) -> Type {
+        precondition(index < numberOfArguments)
         let offset = 3
 
-        var types: [Type] = []
-        for index in 0..<numberOfArguments {
-            let ty = pointer.advanced(by: (offset + index) * word).load(as: Any.Type.self)
-            let type = reflect(type: ty)
-            types.append(type)
+        var pointer = self.pointer.advanced(by: offset * word)
+
+        let firstTypePointer = UnsafeRawPointer(bitPattern: pointer.load(as: Int.self) & (~0b1))!
+        if numberOfArguments == 1 {
+            let type = unsafeBitCast(firstTypePointer, to: Any.Type.self)
+            return reflect(type: type)
         }
 
-        return types
+        // This is messy, if the first argument is not a tuple then we know that atleast 1 argument is inout.
+        //   otherwise if the first argument is a tuple then we must check to see if it has the same number of
+        //   elements as the number of arguments we are expecting.
+
+        let firstType = unsafeBitCast(firstTypePointer, to: Any.Type.self)
+
+        if let tupleType = reflect(type: firstType) as? TupleType, tupleType.numberOfElements == numberOfArguments {
+            return tupleType
+        }
+
+        pointer = pointer.advanced(by: index * word)
+        let typePointer = UnsafeRawPointer(bitPattern: pointer.load(as: Int.self) & (~0b1))!
+        let type = unsafeBitCast(typePointer, to: Any.Type.self)
+        return reflect(type: type)
+    }
+
+    func isParamInout(at index: Int) -> Bool {
+        precondition(index < numberOfArguments)
+        let offset = 3
+
+        let pointerValue = self.pointer.advanced(by: (offset + index) * word).load(as: Int.self)
+        return (pointerValue & 0b1) == 1
+    }
+
+    var hasInoutArguments: Bool {
+        let offset = 3
+
+        var pointer = self.pointer.advanced(by: offset * word)
+
+        if (pointer.load(as: Int.self) & 0b1) == 1 {
+            return true
+        }
+
+        let firstType = unsafeBitCast(pointer, to: Any.Type.self)
+
+        if let tupleType = reflect(type: firstType) as? TupleType, tupleType.numberOfElements == numberOfArguments {
+            return false
+        }
+
+        for index in 1 ..< numberOfArguments {
+            pointer = pointer.advanced(by: index * word)
+
+            if (pointer.load(as: Int.self) & 0b1) == 1 {
+                return true
+            }
+        }
+
+        return false
     }
 }
 
@@ -406,27 +458,6 @@ extension Type {
         }
     }
 }
-
-public protocol HasNominalTypeDescriptor {
-
-    var nominalTypeDescriptorPointer: UnsafeRawPointer { get }
-    var mangledName: String { get }
-    var isGeneric: Bool { get }
-}
-
-extension HasNominalTypeDescriptor {
-
-    var mangledName: String {
-        let offset = 1
-        let pointer = self.nominalTypeDescriptorPointer.advanced(by: offset * word)
-            .assumingMemoryBound(to: CChar.self)
-        return String(cString: pointer)
-    }
-
-
-}
-
-
 
 internal extension UnsafeRawPointer {
 

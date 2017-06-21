@@ -41,7 +41,10 @@ Currenctly we have support for:
         - [ ] Swift defined
         - [ ] dispatch via witness table or objc_msgSend
 - [ ] Generic Parameter Types (and WitnessTables if constrained)
-- [ ] Function Types
+- [x] Function Types
+    - [x] Argument Types
+    - [x] Result Type
+    - [x] isArgumentInout
 - [ ] Class types
     - [ ] isGeneric
     - [ ] Fields
