@@ -274,8 +274,38 @@ final class TupleType: Type {
     }
 }
 
-/**
+class FunctionType: Type {
 
+    var numberOfArguments: Int {
+        let offset = 1
+        return pointer.advanced(by: offset * word).load(as: Int.self)
+    }
+
+    var resultType: Type {
+        let offset = 2
+        let ty = pointer.advanced(by: offset * word).load(as: Any.Type.self)
+        return reflect(type: ty)
+    }
+
+    var argumentType: [Type] {
+        guard numberOfArguments > 0 else {
+            return []
+        }
+
+        let offset = 3
+
+        var types: [Type] = []
+        for index in 0..<numberOfArguments {
+            let ty = pointer.advanced(by: (offset + index) * word).load(as: Any.Type.self)
+            let type = reflect(type: ty)
+            types.append(type)
+        }
+
+        return types
+    }
+}
+
+/**
  The protocol descriptor vector begins at offset 3. This is an inline array of pointers to the protocol descriptor for every protocol in the composition, or the single protocol descriptor for a protocol type. For an "any" type, there is no protocol descriptor vector.
 */
 class ExistentialType: Type {
