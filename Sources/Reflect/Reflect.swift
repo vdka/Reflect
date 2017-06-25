@@ -232,9 +232,19 @@ final class EnumType: Type {
         return types
     }
 
+    func isIndirect(at index: Int) -> Bool {
+        precondition(index < numberOfCases)
+        guard let accessorFunction = caseTypesAccessor else { return false }
+
+        let pointer = accessorFunction(self.pointer).advanced(by: index).pointee
+
+        let pointerBits = Int(bitPattern: pointer)
+        return (pointerBits & 0b1) == 1
+    }
+
     var isGeneric: Bool {
-        let offset = 6
-        let pointer = self.nominalTypeDescriptorPointer.advanced(by: offset * word)
+        let offset = 3
+        let pointer = self.pointer.advanced(by: offset * word)
             .assumingMemoryBound(to: Int.self)
         return pointer.pointee != 0
     }

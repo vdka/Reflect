@@ -1,13 +1,14 @@
 import XCTest
 @testable import Reflect
 
-struct User {
-    var name: String
-    var height: Double
-}
 
 protocol Foo: class {}
 protocol Bar {}
+
+struct User: Bar {
+    var name: String
+    var height: Double
+}
 
 class ReflectTests: XCTestCase {
 
@@ -20,20 +21,42 @@ class ReflectTests: XCTestCase {
         XCTAssertEqual(ty.numberOfFields, 2)
         XCTAssertEqual(ty.fieldNames, ["name", "height"])
         XCTAssertEqual(ty.fieldOffsets, [0, 24])
-        XCTAssert(!ty.isGeneric)
+        XCTAssertFalse(ty.isGeneric)
     }
 
     func testEnums() {
         var ty: EnumType
         
         ty = reflect(type: Optional<String>.self) as! EnumType
-        XCTAssert(ty.isOptionalType)
+        XCTAssertTrue(ty.isOptionalType)
         XCTAssertEqual(ty.numberOfCases, 2)
         XCTAssertEqual(ty.mangledName, "Sq")
         XCTAssertEqual(ty.numberOfPayloadCases, 1)
         XCTAssertEqual(ty.numberOfNoPayloadCases, 1)
         XCTAssertEqual(ty.payloadSizeOffset, 0)
         XCTAssertEqual(ty.caseNames, ["some", "none"])
+
+        enum Ast {
+            case num(Double)
+            indirect case exprParen(Ast)
+            indirect case prefix(String, Ast)
+            indirect case infix(String, lhs: Ast, rhs: Ast)
+            case invalid
+        }
+
+        ty = reflect(type: Ast.self) as! EnumType
+        XCTAssertFalse(ty.isOptionalType)
+        XCTAssertEqual(ty.numberOfCases, 5)
+        XCTAssertEqual(ty.numberOfPayloadCases, 4)
+        XCTAssertEqual(ty.numberOfNoPayloadCases, 1)
+        XCTAssertEqual(ty.payloadSizeOffset, 0)
+        XCTAssertEqual(ty.caseNames, ["num", "exprParen", "prefix", "infix", "invalid"])
+//        XCTAssertFalse(ty.isGeneric)
+        XCTAssertFalse(ty.isIndirect(at: 0))
+        XCTAssertTrue(ty.isIndirect(at: 1))
+        XCTAssertTrue(ty.isIndirect(at: 2))
+        XCTAssertTrue(ty.isIndirect(at: 3))
+        XCTAssertFalse(ty.isIndirect(at: 4))
     }
 
     func testTuples() {
@@ -69,7 +92,6 @@ class ReflectTests: XCTestCase {
     }
 
     func testExistentials() {
-
         var ty: ExistentialType
 
         ty = reflect(type: Any.self) as! ExistentialType
@@ -95,9 +117,6 @@ class ReflectTests: XCTestCase {
         XCTAssert(!ty.isAnyType)
         XCTAssert(!ty.isAnyClassType)
         XCTAssertEqual(ty.numberOfProtocolsMakingComposition, 2)
-
-        print(ty.numberOfWitnessTables)
-        print(ty.hasClassConstraint)
     }
 
     static var allTests: [(String, (ReflectTests) -> () -> Void)] = [

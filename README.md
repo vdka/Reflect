@@ -5,7 +5,7 @@ Reflect aims to expose the powerful runtime type info included in your swift bin
 Currenctly we have support for:
 
 # Type Reflections
-- [ ] Struct types
+- [x] Struct types
     - [x] Mangled name
     - [x] Fields
         - [x] Count
